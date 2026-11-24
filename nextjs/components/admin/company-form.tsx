@@ -2,15 +2,17 @@
 
 import Link from "next/link";
 import { useActionState } from "react";
+import { PhoneListInput } from "@/components/phone-list-input";
 import { SubmitButton } from "@/components/submit-button";
 import { FormError, inputClass, labelClass } from "@/components/ui";
-import type { Company, FormState } from "@/lib/types";
+import { multiValue, type Company, type FormState } from "@/lib/types";
 
 type Action = (prev: FormState, formData: FormData) => Promise<FormState>;
 
 export function CompanyForm({ action, company }: { action: Action; company?: Company }) {
   const [state, formAction] = useActionState(action, {});
-  const value = (key: keyof Company) => state.values?.[key] ?? company?.[key]?.toString() ?? "";
+  const value = (key: "ad" | "adres") => state.values?.[key] ?? company?.[key] ?? "";
+  const phones = multiValue(state.values, "telefonlar") ?? company?.telefonlar ?? [];
 
   return (
     <form action={formAction} className="max-w-xl space-y-5 rounded-xl border border-zinc-200 bg-white p-6">
@@ -26,19 +28,7 @@ export function CompanyForm({ action, company }: { action: Action; company?: Com
         </label>
         <textarea id="adres" name="adres" rows={2} maxLength={255} defaultValue={value("adres")} className={inputClass} />
       </div>
-      <div>
-        <label htmlFor="telefonNo" className={labelClass}>
-          Telefon
-        </label>
-        <input
-          id="telefonNo"
-          name="telefonNo"
-          type="tel"
-          maxLength={32}
-          defaultValue={value("telefonNo")}
-          className={inputClass}
-        />
-      </div>
+      <PhoneListInput key={phones.join("\n")} initial={phones} />
 
       <FormError message={state.error} />
 

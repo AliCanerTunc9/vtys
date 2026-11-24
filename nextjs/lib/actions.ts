@@ -19,20 +19,28 @@ import {
 
 /**
  * The submitted text fields, used to refill a form after an error. Fields
- * sent more than once (checkboxes) are joined with commas.
+ * sent more than once (checkboxes, phone inputs) are joined with newlines,
+ * which can't be typed into a single-line input. See `multiValue()`.
  */
 function fieldValues(formData: FormData): Record<string, string> {
   const values: Record<string, string> = {};
   formData.forEach((value, key) => {
     if (typeof value !== "string" || key.startsWith("$ACTION")) return;
-    values[key] = key in values ? `${values[key]},${value}` : value;
+    values[key] = key in values ? `${values[key]}\n${value}` : value;
   });
   return values;
 }
 
-/** Form fields as a plain object; `saticilar` (checkboxes) becomes an array. */
+/**
+ * Form fields as a plain object. Fields that can appear more than once
+ * (`saticilar` checkboxes, `telefonlar` inputs) become arrays.
+ */
 function formObject(formData: FormData): Record<string, unknown> {
-  return { ...Object.fromEntries(formData), saticilar: formData.getAll("saticilar") };
+  return {
+    ...Object.fromEntries(formData),
+    saticilar: formData.getAll("saticilar"),
+    telefonlar: formData.getAll("telefonlar").filter((v) => typeof v === "string"),
+  };
 }
 
 /** Returns a user-facing message for known errors; rethrows anything else. */

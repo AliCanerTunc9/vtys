@@ -14,16 +14,30 @@ CREATE TABLE sirket (
     sirket_no BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
     ad VARCHAR(150) NOT NULL,
     adres VARCHAR(255),
-    telefon_no VARCHAR(32),
     PRIMARY KEY (sirket_no)
+);
+
+-- Çok değerli nitelik: bir şirketin birden fazla telefon numarası olabilir.
+CREATE TABLE sirket_telefon (
+    sirket_no BIGINT UNSIGNED NOT NULL,
+    telefon_no VARCHAR(32) NOT NULL,
+    PRIMARY KEY (sirket_no, telefon_no),
+    CONSTRAINT fk_sirket_telefon_sirket FOREIGN KEY (sirket_no) REFERENCES sirket (sirket_no) ON DELETE CASCADE
 );
 
 CREATE TABLE musteri (
     kimlik_no VARCHAR(32) NOT NULL,
     ad VARCHAR(150) NOT NULL,
     adres VARCHAR(255),
-    telefon_no VARCHAR(32),
     PRIMARY KEY (kimlik_no)
+);
+
+-- Çok değerli nitelik: bir müşterinin birden fazla telefon numarası olabilir.
+CREATE TABLE musteri_telefon (
+    kimlik_no VARCHAR(32) NOT NULL,
+    telefon_no VARCHAR(32) NOT NULL,
+    PRIMARY KEY (kimlik_no, telefon_no),
+    CONSTRAINT fk_musteri_telefon_musteri FOREIGN KEY (kimlik_no) REFERENCES musteri (kimlik_no) ON DELETE CASCADE
 );
 
 CREATE TABLE fatura (

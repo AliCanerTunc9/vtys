@@ -10,7 +10,8 @@ export async function GET() {
 /**
  * POST /api/invoices — place an order. Saves the customer (musteri), creates
  * the invoice (fatura), adds one satin_alir row per product and lowers stock.
- * Body: { musteri: { kimlikNo, ad, adres, telefonNo }, urunler: [urunNo, ...] }
+ * Body: { musteri: { kimlikNo, ad, adres, telefonlar: string[] }, urunler: [urunNo, ...] }
+ * The phone numbers are added to the customer's saved numbers.
  * 409 if a product is out of stock or the customer already bought it.
  */
 export async function POST(request: Request) {

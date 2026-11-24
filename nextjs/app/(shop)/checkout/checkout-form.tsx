@@ -2,18 +2,20 @@
 
 import Link from "next/link";
 import { useActionState } from "react";
+import { PhoneListInput } from "@/components/phone-list-input";
 import { SubmitButton } from "@/components/submit-button";
 import { FormError, inputClass, labelClass } from "@/components/ui";
 import { placeOrder } from "@/lib/actions";
 import { useCart } from "@/lib/cart";
 import { formatPrice } from "@/lib/format";
-import type { FormState } from "@/lib/types";
+import { multiValue, type FormState } from "@/lib/types";
 import { OrderSummary } from "../cart/cart-view";
 
 export function CheckoutForm() {
   const { items, total } = useCart();
   const [state, formAction] = useActionState<FormState, FormData>(placeOrder, {});
   const value = (key: string) => state.values?.[key];
+  const phones = multiValue(state.values, "telefonlar") ?? [];
 
   if (items.length === 0) {
     return (
@@ -62,19 +64,7 @@ export function CheckoutForm() {
             />
           </div>
           <div className="sm:col-span-2">
-            <label htmlFor="telefonNo" className={labelClass}>
-              Telefon
-            </label>
-            <input
-              id="telefonNo"
-              name="telefonNo"
-              type="tel"
-              autoComplete="tel"
-              maxLength={32}
-              required
-              defaultValue={value("telefonNo")}
-              className={inputClass}
-            />
+            <PhoneListInput key={phones.join("\n")} initial={phones} required label="Telefon" />
           </div>
           <div className="sm:col-span-2">
             <label htmlFor="adres" className={labelClass}>
@@ -93,8 +83,9 @@ export function CheckoutForm() {
           </div>
         </div>
         <p className="rounded-lg bg-zinc-50 p-3 text-sm text-zinc-500">
-          Daha önce alışveriş yaptıysanız bilgileriniz kimlik numaranıza göre güncellenir. Bu bir
-          ders projesidir, gerçek ödeme alınmaz.
+          Daha önce alışveriş yaptıysanız bilgileriniz kimlik numaranıza göre güncellenir; yeni
+          telefon numaraları kayıtlı numaralarınıza eklenir. Bu bir ders projesidir, gerçek ödeme
+          alınmaz.
         </p>
       </div>
 

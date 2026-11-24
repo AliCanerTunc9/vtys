@@ -84,16 +84,42 @@ export function validateProduct(raw: Raw): Result<{ input: ProductInput; saticil
   };
 }
 
+// ---------- telefon (sirket_telefon, musteri_telefon) ----------
+
+export const MAX_PHONES = 10;
+const PHONE_PATTERN = /^\+?[0-9 ()-]{7,32}$/;
+
+/**
+ * Checks a phone list. Accepts an array of strings (API) and ignores empty
+ * entries (blank inputs in a form). Duplicates are removed, since
+ * (owner, telefon_no) is the primary key.
+ */
+export function validatePhones(value: unknown, { required = false } = {}): Result<string[]> {
+  if (value === undefined || value === null) value = [];
+  if (!Array.isArray(value) || value.some((v) => typeof v !== "string")) {
+    return fail("telefonlar, metin olarak telefon numaralarından oluşan bir dizi olmalı.");
+  }
+  const phones = [...new Set(value.map((v: string) => v.trim().replace(/\s+/g, " ")).filter(Boolean))];
+  if (required && phones.length === 0) return fail("En az bir telefon numarası girin.");
+  if (phones.length > MAX_PHONES) return fail(`En fazla ${MAX_PHONES} telefon numarası girilebilir.`);
+  const invalid = phones.find((p) => !PHONE_PATTERN.test(p));
+  if (invalid) {
+    return fail(`Geçersiz telefon numarası: "${invalid}". Yalnızca rakam, boşluk, +, - ve parantez kullanın (7–32 karakter).`);
+  }
+  return { ok: true, value: phones };
+}
+
 // ---------- sirket ----------
 
 export function validateCompany(raw: Raw): Result<CompanyInput> {
   const ad = str(raw, "ad");
   const adres = nullableStr(raw, "adres");
-  const telefonNo = nullableStr(raw, "telefonNo");
   if (!ad) return fail("Şirket adı zorunlu.");
-  const lengthError =
-    tooLong(ad, 150, "Şirket adı") || tooLong(adres, 255, "Adres") || tooLong(telefonNo, 32, "Telefon");
-  return lengthError ? fail(lengthError) : { ok: true, value: { ad, adres, telefonNo } };
+  const lengthError = tooLong(ad, 150, "Şirket adı") || tooLong(adres, 255, "Adres");
+  if (lengthError) return fail(lengthError);
+  const telefonlar = validatePhones(raw.telefonlar);
+  if (!telefonlar.ok) return telefonlar;
+  return { ok: true, value: { ad, adres, telefonlar: telefonlar.value } };
 }
 
 // ---------- musteri ----------
@@ -103,24 +129,22 @@ export function validateKimlikNo(kimlikNo: string): string | undefined {
 }
 
 /**
- * Checks a customer. At checkout all fields are required (`requireAll`); the
- * API allows leaving the nullable columns (adres, telefonNo) empty.
+ * Checks a customer. At checkout the address and at least one phone number
+ * are required (`requireAll`); the API allows leaving them empty.
  */
 export function validateCustomer(raw: Raw, { requireAll = false } = {}): Result<Customer> {
   const kimlikNo = str(raw, "kimlikNo");
   const ad = str(raw, "ad");
   const adres = nullableStr(raw, "adres");
-  const telefonNo = nullableStr(raw, "telefonNo");
 
-  if (!kimlikNo || !ad || (requireAll && (!adres || !telefonNo))) {
+  if (!kimlikNo || !ad || (requireAll && !adres)) {
     return fail(requireAll ? "Lütfen tüm alanları doldurun." : "kimlikNo ve ad zorunlu.");
   }
-  const error =
-    validateKimlikNo(kimlikNo) ||
-    tooLong(ad, 150, "Ad soyad") ||
-    tooLong(adres, 255, "Adres") ||
-    tooLong(telefonNo, 32, "Telefon");
-  return error ? fail(error) : { ok: true, value: { kimlikNo, ad, adres, telefonNo } };
+  const error = validateKimlikNo(kimlikNo) || tooLong(ad, 150, "Ad soyad") || tooLong(adres, 255, "Adres");
+  if (error) return fail(error);
+  const telefonlar = validatePhones(raw.telefonlar, { required: requireAll });
+  if (!telefonlar.ok) return telefonlar;
+  return { ok: true, value: { kimlikNo, ad, adres, telefonlar: telefonlar.value } };
 }
 
 // ---------- satin alma (fatura + satin_alir) ----------
