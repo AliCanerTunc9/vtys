@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useActionState } from "react";
 import { SubmitButton } from "@/components/submit-button";
 import { FormError, inputClass, labelClass } from "@/components/ui";
-import type { Company, FormState, ProductWithSellers } from "@/lib/types";
+import { multiValue, type Company, type FormState, type ProductWithSellers } from "@/lib/types";
 
 type Action = (prev: FormState, formData: FormData) => Promise<FormState>;
 
@@ -22,9 +22,7 @@ export function ProductForm({
   const value = (key: keyof ProductWithSellers) =>
     state.values?.[key] ?? product?.[key]?.toString() ?? "";
   const selectedSellers = new Set(
-    state.values
-      ? (state.values.saticilar ?? "").split(",").filter(Boolean).map(Number)
-      : (product?.saticilar.map((s) => s.sirketNo) ?? []),
+    (multiValue(state.values, "saticilar") ?? product?.saticilar.map((s) => String(s.sirketNo)) ?? []).map(Number),
   );
 
   return (

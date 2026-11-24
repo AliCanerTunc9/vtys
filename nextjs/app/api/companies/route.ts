@@ -9,7 +9,7 @@ export async function GET() {
 
 /**
  * POST /api/companies — create a company.
- * Body: { ad, adres?, telefonNo? }
+ * Body: { ad, adres?, telefonlar?: string[] }
  */
 export async function POST(request: Request) {
   return handle(async () => {

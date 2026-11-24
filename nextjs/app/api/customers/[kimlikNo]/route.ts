@@ -17,13 +17,13 @@ export async function GET(_request: Request, ctx: Context) {
 /**
  * PUT /api/customers/:kimlikNo — replace a customer's name and contact
  * details. kimlikNo is the primary key and can't be changed.
- * Body: { ad, adres?, telefonNo? }
+ * Body: { ad, adres?, telefonlar?: string[] } — telefonlar replaces the phone list.
  */
 export async function PUT(request: Request, ctx: Context) {
   return handle(async () => {
     const { kimlikNo } = await ctx.params;
-    const { ad, adres, telefonNo } = valid(validateCustomer({ ...(await readBody(request)), kimlikNo }));
-    await updateCustomer(kimlikNo, { ad, adres, telefonNo });
+    const { ad, adres, telefonlar } = valid(validateCustomer({ ...(await readBody(request)), kimlikNo }));
+    await updateCustomer(kimlikNo, { ad, adres, telefonlar });
     refreshSite();
     return json(await getCustomer(kimlikNo));
   });

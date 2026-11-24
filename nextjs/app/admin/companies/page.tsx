@@ -3,6 +3,7 @@ import Link from "next/link";
 import { Suspense } from "react";
 import { DeleteButton } from "@/components/admin/delete-button";
 import { cardClass, PageHeader, tableClass, tdClass, thClass } from "@/components/admin/page-header";
+import { PhoneList } from "@/components/phone-list";
 import { EmptyState, TableSkeleton } from "@/components/ui";
 import { deleteCompany } from "@/lib/actions";
 import { getCompanies } from "@/lib/data";
@@ -53,7 +54,9 @@ async function CompanyTable() {
               <td className={`${tdClass} font-mono text-zinc-500`}>{c.sirketNo}</td>
               <td className={`${tdClass} font-medium`}>{c.ad}</td>
               <td className={`${tdClass} text-zinc-600`}>{c.adres ?? "—"}</td>
-              <td className={`${tdClass} text-zinc-600`}>{c.telefonNo ?? "—"}</td>
+              <td className={`${tdClass} text-zinc-600`}>
+                <PhoneList phones={c.telefonlar} />
+              </td>
               <td className={`${tdClass} text-right`}>
                 <Link href={`/products?satici=${c.sirketNo}`} className="text-indigo-600 hover:underline">
                   {c.urunSayisi}

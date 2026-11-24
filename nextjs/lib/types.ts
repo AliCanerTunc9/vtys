@@ -15,20 +15,20 @@ export type Product = {
 /** A product together with the companies that sell it (`satar`). */
 export type ProductWithSellers = Product & { saticilar: Company[] };
 
-/** Table `sirket`. */
+/** Table `sirket`, with its phone numbers from `sirket_telefon`. */
 export type Company = {
   sirketNo: number;
   ad: string;
   adres: string | null;
-  telefonNo: string | null;
+  telefonlar: string[];
 };
 
-/** Table `musteri`. */
+/** Table `musteri`, with its phone numbers from `musteri_telefon`. */
 export type Customer = {
   kimlikNo: string;
   ad: string;
   adres: string | null;
-  telefonNo: string | null;
+  telefonlar: string[];
 };
 
 /** Table `fatura`. `tarih` is a DATE, returned as "YYYY-MM-DD". */
@@ -50,6 +50,12 @@ export type InvoiceDetail = Invoice & {
  * (React resets forms after an action).
  */
 export type FormState = { error?: string; values?: Record<string, string> };
+
+/** Reads a field that was sent more than once (see fieldValues in actions.ts). */
+export function multiValue(values: Record<string, string> | undefined, key: string): string[] | undefined {
+  if (!values) return undefined;
+  return key in values ? values[key].split("\n") : [];
+}
 
 export function productName(p: Pick<Product, "marka" | "model">): string {
   return `${p.marka} ${p.model}`;

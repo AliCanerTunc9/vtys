@@ -9,7 +9,7 @@ export async function GET() {
 
 /**
  * POST /api/customers — create a customer. 409 if the kimlikNo already exists.
- * Body: { kimlikNo, ad, adres?, telefonNo? }
+ * Body: { kimlikNo, ad, adres?, telefonlar?: string[] }
  */
 export async function POST(request: Request) {
   return handle(async () => {

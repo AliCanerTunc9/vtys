@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
 import { cardClass, PageHeader, tableClass, tdClass, thClass } from "@/components/admin/page-header";
+import { PhoneList } from "@/components/phone-list";
 import { EmptyState, TableSkeleton } from "@/components/ui";
 import { getCustomers } from "@/lib/data";
 import { formatPrice } from "@/lib/format";
@@ -40,7 +41,9 @@ async function CustomerTable() {
             <tr key={c.kimlikNo} className="hover:bg-zinc-50">
               <td className={`${tdClass} font-mono text-zinc-500`}>{c.kimlikNo}</td>
               <td className={`${tdClass} font-medium`}>{c.ad}</td>
-              <td className={tdClass}>{c.telefonNo ?? "—"}</td>
+              <td className={tdClass}>
+                <PhoneList phones={c.telefonlar} />
+              </td>
               <td className={`${tdClass} text-zinc-600`}>{c.adres ?? "—"}</td>
               <td className={`${tdClass} text-right`}>{c.faturaSayisi}</td>
               <td className={`${tdClass} text-right`}>{c.urunSayisi}</td>

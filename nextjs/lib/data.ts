@@ -43,9 +43,38 @@ const PRODUCT_COLUMNS = `
   u.teknik_ozellikler AS teknikOzellikler, u.birim_fiyati AS birimFiyati,
   u.garanti_suresi_ay AS garantiSuresiAy, u.stok_miktari AS stokMiktari`;
 
-const COMPANY_COLUMNS = `s.sirket_no AS sirketNo, s.ad, s.adres, s.telefon_no AS telefonNo`;
+// Phone numbers are a multivalued attribute stored in sirket_telefon and
+// musteri_telefon. They are read as a JSON array in a subquery and cleaned up
+// with withPhones().
+const COMPANY_COLUMNS = `s.sirket_no AS sirketNo, s.ad, s.adres,
+  (SELECT JSON_ARRAYAGG(t.telefon_no) FROM sirket_telefon t WHERE t.sirket_no = s.sirket_no) AS telefonlar`;
 
-const CUSTOMER_COLUMNS = `m.kimlik_no AS kimlikNo, m.ad, m.adres, m.telefon_no AS telefonNo`;
+const CUSTOMER_COLUMNS = `m.kimlik_no AS kimlikNo, m.ad, m.adres,
+  (SELECT JSON_ARRAYAGG(t.telefon_no) FROM musteri_telefon t WHERE t.kimlik_no = m.kimlik_no) AS telefonlar`;
+
+/** Turns the telefonlar column (JSON array, or NULL when none) into a sorted list. */
+function withPhones<T extends { telefonlar: unknown }>(row: T): T & { telefonlar: string[] } {
+  let value = row.telefonlar;
+  if (typeof value === "string") value = JSON.parse(value);
+  const telefonlar = Array.isArray(value) ? value.map(String).sort() : [];
+  return { ...row, telefonlar };
+}
+
+/** Replaces the phone list of a company or customer. */
+async function setPhones(
+  conn: PoolConnection,
+  table: "sirket_telefon" | "musteri_telefon",
+  keyColumn: "sirket_no" | "kimlik_no",
+  key: number | string,
+  telefonlar: string[],
+) {
+  await conn.query(`DELETE FROM ${table} WHERE ${keyColumn} = ?`, [key]);
+  if (telefonlar.length) {
+    await conn.query(`INSERT INTO ${table} (${keyColumn}, telefon_no) VALUES ?`, [
+      telefonlar.map((t) => [key, t]),
+    ]);
+  }
+}
 
 function escapeLike(value: string): string {
   return value.replace(/[\\%_]/g, (c) => `\\${c}`);
@@ -93,7 +122,7 @@ export async function getProduct(urunNo: number): Promise<ProductWithSellers | u
      WHERE st.urun_no = ? ORDER BY s.ad`,
     [urunNo],
   );
-  return { ...product, saticilar };
+  return { ...product, saticilar: saticilar.map(withPhones) };
 }
 
 /** Distinct brands, for the brand filter. */
@@ -175,11 +204,12 @@ export async function deleteProduct(urunNo: number): Promise<void> {
 // ---------- Companies (sirket) ----------
 
 export async function getCompanies(): Promise<(Company & { urunSayisi: number })[]> {
-  return query(
+  const rows = await query<Company & { urunSayisi: number }>(
     `SELECT ${COMPANY_COLUMNS}, COUNT(st.urun_no) AS urunSayisi
      FROM sirket s LEFT JOIN satar st ON st.sirket_no = s.sirket_no
      GROUP BY s.sirket_no ORDER BY s.ad`,
   );
+  return rows.map(withPhones);
 }
 
 export async function getCompany(sirketNo: number): Promise<Company | undefined> {
@@ -187,25 +217,32 @@ export async function getCompany(sirketNo: number): Promise<Company | undefined>
     `SELECT ${COMPANY_COLUMNS} FROM sirket s WHERE s.sirket_no = ?`,
     [sirketNo],
   );
-  return company;
+  return company && withPhones(company);
 }
 
 export type CompanyInput = Omit<Company, "sirketNo">;
 
 export async function insertCompany(input: CompanyInput): Promise<number> {
-  const [result] = await pool().query<ResultSetHeader>(
-    "INSERT INTO sirket (ad, adres, telefon_no) VALUES (?, ?, ?)",
-    [input.ad, input.adres, input.telefonNo],
-  );
-  return result.insertId;
+  return transaction(async (conn) => {
+    const [result] = await conn.query<ResultSetHeader>(
+      "INSERT INTO sirket (ad, adres) VALUES (?, ?)",
+      [input.ad, input.adres],
+    );
+    await setPhones(conn, "sirket_telefon", "sirket_no", result.insertId, input.telefonlar);
+    return result.insertId;
+  });
 }
 
 export async function updateCompany(sirketNo: number, input: CompanyInput): Promise<void> {
-  const [result] = await pool().query<ResultSetHeader>(
-    "UPDATE sirket SET ad = ?, adres = ?, telefon_no = ? WHERE sirket_no = ?",
-    [input.ad, input.adres, input.telefonNo, sirketNo],
-  );
-  if (result.affectedRows === 0) throw notFound("Şirket");
+  await transaction(async (conn) => {
+    const [result] = await conn.query<ResultSetHeader>(
+      "UPDATE sirket SET ad = ?, adres = ? WHERE sirket_no = ?",
+      [input.ad, input.adres, sirketNo],
+    );
+    // affectedRows counts matched rows (see db.ts), so 0 means not found.
+    if (result.affectedRows === 0) throw notFound("Şirket");
+    await setPhones(conn, "sirket_telefon", "sirket_no", sirketNo, input.telefonlar);
+  });
 }
 
 export async function deleteCompany(sirketNo: number): Promise<void> {
@@ -227,7 +264,7 @@ export async function deleteCompany(sirketNo: number): Promise<void> {
 export async function getCustomers(): Promise<
   (Customer & { faturaSayisi: number; urunSayisi: number; toplamHarcama: number })[]
 > {
-  return query(
+  const rows = await query<Customer & { faturaSayisi: number; urunSayisi: number; toplamHarcama: number }>(
     `SELECT ${CUSTOMER_COLUMNS},
        COUNT(DISTINCT sa.fatura_no) AS faturaSayisi,
        COUNT(sa.urun_no) AS urunSayisi,
@@ -237,6 +274,7 @@ export async function getCustomers(): Promise<
      FROM musteri m LEFT JOIN satin_alir sa ON sa.kimlik_no = m.kimlik_no
      GROUP BY m.kimlik_no ORDER BY m.ad`,
   );
+  return rows.map(withPhones);
 }
 
 export async function getCustomer(kimlikNo: string): Promise<Customer | undefined> {
@@ -244,7 +282,7 @@ export async function getCustomer(kimlikNo: string): Promise<Customer | undefine
     `SELECT ${CUSTOMER_COLUMNS} FROM musteri m WHERE m.kimlik_no = ?`,
     [kimlikNo],
   );
-  return customer;
+  return customer && withPhones(customer);
 }
 
 /** Invoices that contain at least one product bought by this customer. */
@@ -258,30 +296,35 @@ export async function getCustomerInvoices(kimlikNo: string): Promise<Invoice[]> 
 }
 
 export async function insertCustomer(input: Customer): Promise<void> {
-  try {
-    await pool().query("INSERT INTO musteri (kimlik_no, ad, adres, telefon_no) VALUES (?, ?, ?, ?)", [
-      input.kimlikNo,
-      input.ad,
-      input.adres,
-      input.telefonNo,
-    ]);
-  } catch (e) {
-    if ((e as { code?: string }).code === "ER_DUP_ENTRY") {
-      throw new DataError("Bu kimlik numarasıyla kayıtlı bir müşteri zaten var.");
+  await transaction(async (conn) => {
+    try {
+      await conn.query("INSERT INTO musteri (kimlik_no, ad, adres) VALUES (?, ?, ?)", [
+        input.kimlikNo,
+        input.ad,
+        input.adres,
+      ]);
+    } catch (e) {
+      if ((e as { code?: string }).code === "ER_DUP_ENTRY") {
+        throw new DataError("Bu kimlik numarasıyla kayıtlı bir müşteri zaten var.");
+      }
+      throw e;
     }
-    throw e;
-  }
+    await setPhones(conn, "musteri_telefon", "kimlik_no", input.kimlikNo, input.telefonlar);
+  });
 }
 
 export async function updateCustomer(
   kimlikNo: string,
   input: Omit<Customer, "kimlikNo">,
 ): Promise<void> {
-  const [result] = await pool().query<ResultSetHeader>(
-    "UPDATE musteri SET ad = ?, adres = ?, telefon_no = ? WHERE kimlik_no = ?",
-    [input.ad, input.adres, input.telefonNo, kimlikNo],
-  );
-  if (result.affectedRows === 0) throw notFound("Müşteri");
+  await transaction(async (conn) => {
+    const [result] = await conn.query<ResultSetHeader>(
+      "UPDATE musteri SET ad = ?, adres = ? WHERE kimlik_no = ?",
+      [input.ad, input.adres, kimlikNo],
+    );
+    if (result.affectedRows === 0) throw notFound("Müşteri");
+    await setPhones(conn, "musteri_telefon", "kimlik_no", kimlikNo, input.telefonlar);
+  });
 }
 
 export async function deleteCustomer(kimlikNo: string): Promise<void> {
@@ -326,8 +369,8 @@ export async function getInvoice(faturaNo: number): Promise<InvoiceDetail | unde
   if (!invoice) return undefined;
   const [customers, urunler] = await Promise.all([
     query<Customer>(
-      `SELECT DISTINCT ${CUSTOMER_COLUMNS} FROM musteri m
-       JOIN satin_alir sa ON sa.kimlik_no = m.kimlik_no WHERE sa.fatura_no = ?`,
+      `SELECT ${CUSTOMER_COLUMNS} FROM musteri m
+       WHERE m.kimlik_no IN (SELECT kimlik_no FROM satin_alir WHERE fatura_no = ?)`,
       [faturaNo],
     ),
     query<Product>(
@@ -337,7 +380,7 @@ export async function getInvoice(faturaNo: number): Promise<InvoiceDetail | unde
       [faturaNo],
     ),
   ]);
-  return { ...invoice, musteri: customers[0] ?? null, urunler };
+  return { ...invoice, musteri: customers[0] ? withPhones(customers[0]) : null, urunler };
 }
 
 /**
@@ -354,10 +397,17 @@ export async function createPurchase(customer: Customer, urunNolar: number[]): P
 
   return transaction(async (conn) => {
     await conn.query(
-      `INSERT INTO musteri (kimlik_no, ad, adres, telefon_no) VALUES (?, ?, ?, ?)
-       ON DUPLICATE KEY UPDATE ad = VALUES(ad), adres = VALUES(adres), telefon_no = VALUES(telefon_no)`,
-      [customer.kimlikNo, customer.ad, customer.adres, customer.telefonNo],
+      `INSERT INTO musteri (kimlik_no, ad, adres) VALUES (?, ?, ?)
+       ON DUPLICATE KEY UPDATE ad = VALUES(ad), adres = VALUES(adres)`,
+      [customer.kimlikNo, customer.ad, customer.adres],
     );
+    // Phone numbers given at checkout are added to the customer's list;
+    // numbers saved earlier are kept.
+    if (customer.telefonlar.length) {
+      await conn.query("INSERT IGNORE INTO musteri_telefon (kimlik_no, telefon_no) VALUES ?", [
+        customer.telefonlar.map((t) => [customer.kimlikNo, t]),
+      ]);
+    }
 
     // Lock the product rows so stock can't change until we commit.
     const [products] = await conn.query<Row<Product>[]>(

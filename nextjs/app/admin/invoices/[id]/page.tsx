@@ -3,6 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
 import { cardClass, tableClass, tdClass, thClass } from "@/components/admin/page-header";
+import { PhoneList } from "@/components/phone-list";
 import { TableSkeleton } from "@/components/ui";
 import { getInvoice } from "@/lib/data";
 import { formatDate, formatPrice } from "@/lib/format";
@@ -83,7 +84,7 @@ async function InvoiceDetail({ params }: { params: PageProps<"/admin/invoices/[i
             <>
               <p className="font-medium">{invoice.musteri.ad}</p>
               <p className="font-mono text-zinc-500">{invoice.musteri.kimlikNo}</p>
-              <p className="text-zinc-500">{invoice.musteri.telefonNo ?? "—"}</p>
+              <PhoneList phones={invoice.musteri.telefonlar} className="text-zinc-500" />
               <p className="text-zinc-600">{invoice.musteri.adres ?? "—"}</p>
             </>
           ) : (

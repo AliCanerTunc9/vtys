@@ -18,6 +18,9 @@ export function pool(): Pool {
     decimalNumbers: true,
     dateStrings: true,
     charset: "utf8mb4",
+    // UPDATE reports matched rows, not changed rows, so saving a form without
+    // changes isn't mistaken for "row not found" (affectedRows === 0).
+    flags: ["+FOUND_ROWS"],
   });
   return globalForDb.__vtysPool;
 }

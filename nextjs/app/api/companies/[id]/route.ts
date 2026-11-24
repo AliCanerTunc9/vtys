@@ -16,7 +16,7 @@ export async function GET(_request: Request, ctx: Context) {
 
 /**
  * PUT /api/companies/:id — replace all fields of a company.
- * Body: { ad, adres?, telefonNo? }
+ * Body: { ad, adres?, telefonlar?: string[] } — telefonlar replaces the phone list.
  */
 export async function PUT(request: Request, ctx: Context) {
   return handle(async () => {
