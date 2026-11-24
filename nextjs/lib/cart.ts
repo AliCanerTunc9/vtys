@@ -4,15 +4,17 @@ import { useSyncExternalStore } from "react";
 
 // Shopping cart kept in the browser's localStorage. The prices stored here
 // are only for display; the server reads prices again when the order is placed.
+//
+// satin_alir has no quantity column, so the cart holds at most one of each
+// product.
 
 export type CartItem = {
-  productId: number;
+  urunNo: number;
   name: string;
   price: number;
-  quantity: number;
 };
 
-const STORAGE_KEY = "vtys-cart";
+const STORAGE_KEY = "vtys-cart-v2";
 const EMPTY: CartItem[] = [];
 
 let items: CartItem[] = EMPTY;
@@ -66,29 +68,15 @@ function getServerSnapshot() {
   return EMPTY;
 }
 
-export function addToCart(item: Omit<CartItem, "quantity">, quantity = 1) {
+export function addToCart(item: CartItem) {
   load();
-  const existing = items.find((i) => i.productId === item.productId);
-  save(
-    existing
-      ? items.map((i) =>
-          i.productId === item.productId ? { ...i, quantity: i.quantity + quantity } : i,
-        )
-      : [...items, { ...item, quantity }],
-  );
+  if (items.some((i) => i.urunNo === item.urunNo)) return;
+  save([...items, item]);
 }
 
-export function setQuantity(productId: number, quantity: number) {
+export function removeFromCart(urunNo: number) {
   load();
-  save(
-    quantity <= 0
-      ? items.filter((i) => i.productId !== productId)
-      : items.map((i) => (i.productId === productId ? { ...i, quantity } : i)),
-  );
-}
-
-export function removeFromCart(productId: number) {
-  setQuantity(productId, 0);
+  save(items.filter((i) => i.urunNo !== urunNo));
 }
 
 export function clearCart() {
@@ -97,7 +85,6 @@ export function clearCart() {
 
 export function useCart() {
   const cartItems = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
-  const count = cartItems.reduce((sum, i) => sum + i.quantity, 0);
-  const total = cartItems.reduce((sum, i) => sum + i.price * i.quantity, 0);
-  return { items: cartItems, count, total };
+  const total = cartItems.reduce((sum, i) => sum + i.price, 0);
+  return { items: cartItems, count: cartItems.length, total };
 }

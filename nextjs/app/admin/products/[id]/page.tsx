@@ -5,7 +5,7 @@ import { PageHeader } from "@/components/admin/page-header";
 import { ProductForm } from "@/components/admin/product-form";
 import { TableSkeleton } from "@/components/ui";
 import { updateProduct } from "@/lib/actions";
-import { getCategories, getProduct } from "@/lib/data";
+import { getCompanies, getProduct } from "@/lib/data";
 
 export const metadata: Metadata = { title: "Ürünü düzenle" };
 
@@ -20,22 +20,19 @@ export default function EditProductPage({ params }: PageProps<"/admin/products/[
   );
 }
 
-async function EditProductForm({
-  params,
-}: {
-  params: PageProps<"/admin/products/[id]">["params"];
-}) {
+async function EditProductForm({ params }: { params: PageProps<"/admin/products/[id]">["params"] }) {
   const { id } = await params;
-  const [product, categories] = await Promise.all([
-    getProduct(Number(id)),
-    getCategories(),
+  const urunNo = Number(id);
+  const [product, companies] = await Promise.all([
+    Number.isInteger(urunNo) && urunNo > 0 ? getProduct(urunNo) : undefined,
+    getCompanies(),
   ]);
   if (!product) notFound();
 
   return (
     <ProductForm
-      action={updateProduct.bind(null, product.id)}
-      categories={categories}
+      action={updateProduct.bind(null, product.urunNo)}
+      companies={companies}
       product={product}
     />
   );

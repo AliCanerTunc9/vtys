@@ -1,228 +1,447 @@
+import type { PoolConnection, ResultSetHeader, RowDataPacket } from "mysql2/promise";
 import { connection } from "next/server";
-import {
-  seedCategories,
-  seedCustomers,
-  seedOrders,
-  seedProducts,
-} from "./mock-data";
+import { pool, transaction } from "./db";
 import type {
-  Category,
+  Company,
   Customer,
-  Order,
-  OrderWithCustomer,
+  Invoice,
+  InvoiceDetail,
   Product,
-  ProductWithCategory,
+  ProductWithSellers,
 } from "./types";
 
-// Data access layer.
-//
-// Every page and action reads and writes data only through this file. It
-// currently uses an in-memory store seeded from mock-data.ts. When the MySQL
-// tables are ready, replace each function body with a query; the function
-// signatures and return types stay the same, so no UI code has to change.
+// Data access layer: every page and action reads and writes the database only
+// through this file. Queries follow the tables in Eticaret.sql.
 
-type Store = {
-  categories: Category[];
-  products: Product[];
-  customers: Customer[];
-  orders: Order[];
-};
-
-// Kept on globalThis so the data survives hot reloads in development.
-const globalStore = globalThis as unknown as { __vtysStore?: Store };
-
-function db(): Store {
-  globalStore.__vtysStore ??= {
-    categories: structuredClone(seedCategories),
-    products: structuredClone(seedProducts),
-    customers: structuredClone(seedCustomers),
-    orders: structuredClone(seedOrders),
-  };
-  return globalStore.__vtysStore;
+/**
+ * An error whose message can be shown to the user as-is. `status` is the HTTP
+ * status the API returns for it: 400 for a bad reference, 404 when a row
+ * doesn't exist, 409 when a database rule blocks the change.
+ */
+export class DataError extends Error {
+  constructor(
+    message: string,
+    readonly status: 400 | 404 | 409 = 409,
+  ) {
+    super(message);
+  }
 }
 
-// Data is read per request, like a real database. Callers must render inside
-// a <Suspense> boundary.
-async function read(): Promise<Store> {
+const notFound = (what: string) => new DataError(`${what} bulunamadı.`, 404);
+
+type Row<T> = T & RowDataPacket;
+
+async function query<T>(sql: string, params: unknown[] = []): Promise<T[]> {
+  // Data is read per request; callers render inside a <Suspense> boundary.
   await connection();
-  return db();
+  const [rows] = await pool().query<Row<T>[]>(sql, params);
+  return rows;
 }
 
-function nextId(rows: { id: number }[], start = 1): number {
-  return rows.reduce((max, row) => Math.max(max, row.id), start - 1) + 1;
+const PRODUCT_COLUMNS = `
+  u.urun_no AS urunNo, u.marka, u.model,
+  u.teknik_ozellikler AS teknikOzellikler, u.birim_fiyati AS birimFiyati,
+  u.garanti_suresi_ay AS garantiSuresiAy, u.stok_miktari AS stokMiktari`;
+
+const COMPANY_COLUMNS = `s.sirket_no AS sirketNo, s.ad, s.adres, s.telefon_no AS telefonNo`;
+
+const CUSTOMER_COLUMNS = `m.kimlik_no AS kimlikNo, m.ad, m.adres, m.telefon_no AS telefonNo`;
+
+function escapeLike(value: string): string {
+  return value.replace(/[\\%_]/g, (c) => `\\${c}`);
 }
 
-// ---------- Categories ----------
-
-export async function getCategories(): Promise<Category[]> {
-  const { categories } = await read();
-  return categories;
-}
-
-// ---------- Products ----------
+// ---------- Products (urun, satar) ----------
 
 export async function getProducts(
-  filter: { categorySlug?: string; query?: string } = {},
-): Promise<ProductWithCategory[]> {
-  const { products, categories } = await read();
-  const category = filter.categorySlug
-    ? categories.find((c) => c.slug === filter.categorySlug)
-    : undefined;
-  const query = filter.query?.trim().toLocaleLowerCase("tr");
-
-  return products
-    .filter((p) => !filter.categorySlug || p.categoryId === category?.id)
-    .filter(
-      (p) =>
-        !query ||
-        p.name.toLocaleLowerCase("tr").includes(query) ||
-        p.description.toLocaleLowerCase("tr").includes(query),
-    )
-    .map((p) => ({ ...p, category: categories.find((c) => c.id === p.categoryId) }));
+  filter: { marka?: string; sirketNo?: number; query?: string; limit?: number } = {},
+): Promise<Product[]> {
+  const where: string[] = [];
+  const params: unknown[] = [];
+  if (filter.marka) {
+    where.push("u.marka = ?");
+    params.push(filter.marka);
+  }
+  if (filter.sirketNo) {
+    where.push("EXISTS (SELECT 1 FROM satar st WHERE st.urun_no = u.urun_no AND st.sirket_no = ?)");
+    params.push(filter.sirketNo);
+  }
+  const q = filter.query?.trim();
+  if (q) {
+    where.push("CONCAT_WS(' ', u.marka, u.model, u.teknik_ozellikler) LIKE ?");
+    params.push(`%${escapeLike(q)}%`);
+  }
+  let sql = `SELECT ${PRODUCT_COLUMNS} FROM urun u`;
+  if (where.length) sql += ` WHERE ${where.join(" AND ")}`;
+  sql += " ORDER BY u.urun_no DESC";
+  if (filter.limit) {
+    sql += " LIMIT ?";
+    params.push(filter.limit);
+  }
+  return query<Product>(sql, params);
 }
 
-export async function getProduct(
-  id: number,
-): Promise<ProductWithCategory | undefined> {
-  const { products, categories } = await read();
-  const product = products.find((p) => p.id === id);
+export async function getProduct(urunNo: number): Promise<ProductWithSellers | undefined> {
+  const [product] = await query<Product>(
+    `SELECT ${PRODUCT_COLUMNS} FROM urun u WHERE u.urun_no = ?`,
+    [urunNo],
+  );
   if (!product) return undefined;
-  return {
-    ...product,
-    category: categories.find((c) => c.id === product.categoryId),
-  };
+  const saticilar = await query<Company>(
+    `SELECT ${COMPANY_COLUMNS} FROM sirket s
+     JOIN satar st ON st.sirket_no = s.sirket_no
+     WHERE st.urun_no = ? ORDER BY s.ad`,
+    [urunNo],
+  );
+  return { ...product, saticilar };
 }
 
-export type ProductInput = Omit<Product, "id" | "createdAt">;
-
-export async function insertProduct(input: ProductInput): Promise<Product> {
-  const store = db();
-  const product: Product = {
-    ...input,
-    id: nextId(store.products),
-    createdAt: new Date().toISOString(),
-  };
-  store.products.push(product);
-  return product;
+/** Distinct brands, for the brand filter. */
+export async function getBrands(): Promise<string[]> {
+  const rows = await query<{ marka: string }>(
+    "SELECT DISTINCT marka FROM urun ORDER BY marka",
+  );
+  return rows.map((r) => r.marka);
 }
 
-export async function updateProductRow(
-  id: number,
-  input: ProductInput,
-): Promise<boolean> {
-  const product = db().products.find((p) => p.id === id);
-  if (!product) return false;
-  Object.assign(product, input);
-  return true;
-}
+export type ProductInput = Omit<Product, "urunNo">;
 
-export async function deleteProductRow(id: number): Promise<void> {
-  const store = db();
-  store.products = store.products.filter((p) => p.id !== id);
-}
-
-// ---------- Customers ----------
-
-export async function getCustomers(): Promise<
-  (Customer & { orderCount: number; totalSpent: number })[]
-> {
-  const { customers, orders } = await read();
-  return customers.map((c) => {
-    const own = orders.filter(
-      (o) => o.customerId === c.id && o.status !== "cancelled",
+async function setSellers(
+  conn: PoolConnection,
+  urunNo: number,
+  sirketNolar: number[],
+) {
+  if (sirketNolar.length) {
+    const [found] = await conn.query<Row<{ n: number }>[]>(
+      "SELECT COUNT(*) AS n FROM sirket WHERE sirket_no IN (?)",
+      [sirketNolar],
     );
-    return {
-      ...c,
-      orderCount: own.length,
-      totalSpent: own.reduce((sum, o) => sum + o.total, 0),
-    };
+    if (found[0].n !== new Set(sirketNolar).size) {
+      throw new DataError("Satıcı listesinde kayıtlı olmayan bir şirket numarası var.", 400);
+    }
+  }
+  await conn.query("DELETE FROM satar WHERE urun_no = ?", [urunNo]);
+  if (sirketNolar.length) {
+    await conn.query("INSERT INTO satar (sirket_no, urun_no) VALUES ?", [
+      sirketNolar.map((s) => [s, urunNo]),
+    ]);
+  }
+}
+
+export async function insertProduct(input: ProductInput, sirketNolar: number[]): Promise<number> {
+  return transaction(async (conn) => {
+    const [result] = await conn.query<ResultSetHeader>(
+      `INSERT INTO urun (marka, model, teknik_ozellikler, birim_fiyati, garanti_suresi_ay, stok_miktari)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [input.marka, input.model, input.teknikOzellikler, input.birimFiyati, input.garantiSuresiAy, input.stokMiktari],
+    );
+    await setSellers(conn, result.insertId, sirketNolar);
+    return result.insertId;
   });
 }
 
-/** Finds a customer by email, or creates one. */
-export async function upsertCustomer(
-  input: Omit<Customer, "id" | "createdAt">,
-): Promise<Customer> {
-  const store = db();
-  const email = input.email.toLowerCase();
-  const existing = store.customers.find((c) => c.email === email);
-  if (existing) {
-    Object.assign(existing, { ...input, email });
-    return existing;
+export async function updateProduct(
+  urunNo: number,
+  input: ProductInput,
+  sirketNolar: number[],
+): Promise<void> {
+  await transaction(async (conn) => {
+    const [result] = await conn.query<ResultSetHeader>(
+      `UPDATE urun SET marka = ?, model = ?, teknik_ozellikler = ?, birim_fiyati = ?,
+         garanti_suresi_ay = ?, stok_miktari = ?
+       WHERE urun_no = ?`,
+      [input.marka, input.model, input.teknikOzellikler, input.birimFiyati, input.garantiSuresiAy, input.stokMiktari, urunNo],
+    );
+    if (result.affectedRows === 0) throw notFound("Ürün");
+    await setSellers(conn, urunNo, sirketNolar);
+  });
+}
+
+export async function deleteProduct(urunNo: number): Promise<void> {
+  await transaction(async (conn) => {
+    const [sold] = await conn.query<Row<{ n: number }>[]>(
+      "SELECT COUNT(*) AS n FROM satin_alir WHERE urun_no = ?",
+      [urunNo],
+    );
+    if (sold[0].n > 0) {
+      throw new DataError("Bu ürün satın alınmış, faturalarda kullanıldığı için silinemez.");
+    }
+    await conn.query("DELETE FROM satar WHERE urun_no = ?", [urunNo]);
+    const [result] = await conn.query<ResultSetHeader>("DELETE FROM urun WHERE urun_no = ?", [urunNo]);
+    if (result.affectedRows === 0) throw notFound("Ürün");
+  });
+}
+
+// ---------- Companies (sirket) ----------
+
+export async function getCompanies(): Promise<(Company & { urunSayisi: number })[]> {
+  return query(
+    `SELECT ${COMPANY_COLUMNS}, COUNT(st.urun_no) AS urunSayisi
+     FROM sirket s LEFT JOIN satar st ON st.sirket_no = s.sirket_no
+     GROUP BY s.sirket_no ORDER BY s.ad`,
+  );
+}
+
+export async function getCompany(sirketNo: number): Promise<Company | undefined> {
+  const [company] = await query<Company>(
+    `SELECT ${COMPANY_COLUMNS} FROM sirket s WHERE s.sirket_no = ?`,
+    [sirketNo],
+  );
+  return company;
+}
+
+export type CompanyInput = Omit<Company, "sirketNo">;
+
+export async function insertCompany(input: CompanyInput): Promise<number> {
+  const [result] = await pool().query<ResultSetHeader>(
+    "INSERT INTO sirket (ad, adres, telefon_no) VALUES (?, ?, ?)",
+    [input.ad, input.adres, input.telefonNo],
+  );
+  return result.insertId;
+}
+
+export async function updateCompany(sirketNo: number, input: CompanyInput): Promise<void> {
+  const [result] = await pool().query<ResultSetHeader>(
+    "UPDATE sirket SET ad = ?, adres = ?, telefon_no = ? WHERE sirket_no = ?",
+    [input.ad, input.adres, input.telefonNo, sirketNo],
+  );
+  if (result.affectedRows === 0) throw notFound("Şirket");
+}
+
+export async function deleteCompany(sirketNo: number): Promise<void> {
+  const [rows] = await pool().query<Row<{ n: number }>[]>(
+    "SELECT COUNT(*) AS n FROM satar WHERE sirket_no = ?",
+    [sirketNo],
+  );
+  if (rows[0].n > 0) {
+    throw new DataError(
+      `Bu şirket ${rows[0].n} ürünün satıcısı. Silmeden önce ürünlerden satıcı olarak kaldırın.`,
+    );
   }
-  const customer: Customer = {
-    ...input,
-    email,
-    id: nextId(store.customers),
-    createdAt: new Date().toISOString(),
-  };
-  store.customers.push(customer);
+  const [result] = await pool().query<ResultSetHeader>("DELETE FROM sirket WHERE sirket_no = ?", [sirketNo]);
+  if (result.affectedRows === 0) throw notFound("Şirket");
+}
+
+// ---------- Customers (musteri) ----------
+
+export async function getCustomers(): Promise<
+  (Customer & { faturaSayisi: number; urunSayisi: number; toplamHarcama: number })[]
+> {
+  return query(
+    `SELECT ${CUSTOMER_COLUMNS},
+       COUNT(DISTINCT sa.fatura_no) AS faturaSayisi,
+       COUNT(sa.urun_no) AS urunSayisi,
+       COALESCE((SELECT SUM(f.tutar) FROM fatura f
+                 WHERE f.fatura_no IN (SELECT fatura_no FROM satin_alir WHERE kimlik_no = m.kimlik_no)), 0)
+         AS toplamHarcama
+     FROM musteri m LEFT JOIN satin_alir sa ON sa.kimlik_no = m.kimlik_no
+     GROUP BY m.kimlik_no ORDER BY m.ad`,
+  );
+}
+
+export async function getCustomer(kimlikNo: string): Promise<Customer | undefined> {
+  const [customer] = await query<Customer>(
+    `SELECT ${CUSTOMER_COLUMNS} FROM musteri m WHERE m.kimlik_no = ?`,
+    [kimlikNo],
+  );
   return customer;
 }
 
-// ---------- Orders ----------
-
-export async function getOrders(): Promise<OrderWithCustomer[]> {
-  const { orders, customers } = await read();
-  return [...orders]
-    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
-    .map((o) => ({ ...o, customer: customers.find((c) => c.id === o.customerId) }));
+/** Invoices that contain at least one product bought by this customer. */
+export async function getCustomerInvoices(kimlikNo: string): Promise<Invoice[]> {
+  return query(
+    `SELECT f.fatura_no AS faturaNo, f.tutar, f.tarih FROM fatura f
+     WHERE f.fatura_no IN (SELECT fatura_no FROM satin_alir WHERE kimlik_no = ?)
+     ORDER BY f.tarih DESC, f.fatura_no DESC`,
+    [kimlikNo],
+  );
 }
 
-export async function getOrder(
-  id: number,
-): Promise<OrderWithCustomer | undefined> {
-  const { orders, customers } = await read();
-  const order = orders.find((o) => o.id === id);
-  if (!order) return undefined;
-  return { ...order, customer: customers.find((c) => c.id === order.customerId) };
-}
-
-export async function insertOrder(
-  input: Omit<Order, "id" | "createdAt" | "status">,
-): Promise<Order> {
-  const store = db();
-  // Stock is checked and reduced in the same step. In SQL this should be one
-  // transaction.
-  for (const item of input.items) {
-    const product = store.products.find((p) => p.id === item.productId);
-    if (!product || product.stock < item.quantity) {
-      throw new Error(`Yetersiz stok: ${item.productName}`);
+export async function insertCustomer(input: Customer): Promise<void> {
+  try {
+    await pool().query("INSERT INTO musteri (kimlik_no, ad, adres, telefon_no) VALUES (?, ?, ?, ?)", [
+      input.kimlikNo,
+      input.ad,
+      input.adres,
+      input.telefonNo,
+    ]);
+  } catch (e) {
+    if ((e as { code?: string }).code === "ER_DUP_ENTRY") {
+      throw new DataError("Bu kimlik numarasıyla kayıtlı bir müşteri zaten var.");
     }
+    throw e;
   }
-  for (const item of input.items) {
-    const product = store.products.find((p) => p.id === item.productId)!;
-    product.stock -= item.quantity;
-  }
-  const order: Order = {
-    ...input,
-    id: nextId(store.orders, 1001),
-    status: "pending",
-    createdAt: new Date().toISOString(),
-  };
-  store.orders.push(order);
-  return order;
 }
 
-export async function updateOrderStatusRow(
-  id: number,
-  status: Order["status"],
+export async function updateCustomer(
+  kimlikNo: string,
+  input: Omit<Customer, "kimlikNo">,
 ): Promise<void> {
-  const order = db().orders.find((o) => o.id === id);
-  if (order) order.status = status;
+  const [result] = await pool().query<ResultSetHeader>(
+    "UPDATE musteri SET ad = ?, adres = ?, telefon_no = ? WHERE kimlik_no = ?",
+    [input.ad, input.adres, input.telefonNo, kimlikNo],
+  );
+  if (result.affectedRows === 0) throw notFound("Müşteri");
+}
+
+export async function deleteCustomer(kimlikNo: string): Promise<void> {
+  const [rows] = await pool().query<Row<{ n: number }>[]>(
+    "SELECT COUNT(*) AS n FROM satin_alir WHERE kimlik_no = ?",
+    [kimlikNo],
+  );
+  if (rows[0].n > 0) {
+    throw new DataError("Bu müşterinin satın alımları var, önce faturalarını silin.");
+  }
+  const [result] = await pool().query<ResultSetHeader>("DELETE FROM musteri WHERE kimlik_no = ?", [kimlikNo]);
+  if (result.affectedRows === 0) throw notFound("Müşteri");
+}
+
+// ---------- Invoices (fatura, satin_alir) ----------
+
+export type InvoiceListItem = Invoice & {
+  kimlikNo: string | null;
+  musteriAd: string | null;
+  urunSayisi: number;
+};
+
+export async function getInvoices(limit?: number): Promise<InvoiceListItem[]> {
+  return query(
+    `SELECT f.fatura_no AS faturaNo, f.tutar, f.tarih,
+       MIN(m.kimlik_no) AS kimlikNo, MIN(m.ad) AS musteriAd, COUNT(sa.urun_no) AS urunSayisi
+     FROM fatura f
+     LEFT JOIN satin_alir sa ON sa.fatura_no = f.fatura_no
+     LEFT JOIN musteri m ON m.kimlik_no = sa.kimlik_no
+     GROUP BY f.fatura_no
+     ORDER BY f.tarih DESC, f.fatura_no DESC
+     ${limit ? "LIMIT ?" : ""}`,
+    limit ? [limit] : [],
+  );
+}
+
+export async function getInvoice(faturaNo: number): Promise<InvoiceDetail | undefined> {
+  const [invoice] = await query<Invoice>(
+    "SELECT fatura_no AS faturaNo, tutar, tarih FROM fatura WHERE fatura_no = ?",
+    [faturaNo],
+  );
+  if (!invoice) return undefined;
+  const [customers, urunler] = await Promise.all([
+    query<Customer>(
+      `SELECT DISTINCT ${CUSTOMER_COLUMNS} FROM musteri m
+       JOIN satin_alir sa ON sa.kimlik_no = m.kimlik_no WHERE sa.fatura_no = ?`,
+      [faturaNo],
+    ),
+    query<Product>(
+      `SELECT ${PRODUCT_COLUMNS} FROM urun u
+       JOIN satin_alir sa ON sa.urun_no = u.urun_no WHERE sa.fatura_no = ?
+       ORDER BY u.marka, u.model`,
+      [faturaNo],
+    ),
+  ]);
+  return { ...invoice, musteri: customers[0] ?? null, urunler };
+}
+
+/**
+ * Creates a purchase: saves the customer, creates an invoice, links each
+ * product to it in satin_alir and lowers stock by one. Returns the invoice no.
+ *
+ * satin_alir has no quantity column and its primary key is
+ * (urun_no, kimlik_no), so a customer buys one of each product, and cannot
+ * buy a product they bought before.
+ */
+export async function createPurchase(customer: Customer, urunNolar: number[]): Promise<number> {
+  const ids = [...new Set(urunNolar)];
+  if (ids.length === 0) throw new DataError("Sepetiniz boş.", 400);
+
+  return transaction(async (conn) => {
+    await conn.query(
+      `INSERT INTO musteri (kimlik_no, ad, adres, telefon_no) VALUES (?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE ad = VALUES(ad), adres = VALUES(adres), telefon_no = VALUES(telefon_no)`,
+      [customer.kimlikNo, customer.ad, customer.adres, customer.telefonNo],
+    );
+
+    // Lock the product rows so stock can't change until we commit.
+    const [products] = await conn.query<Row<Product>[]>(
+      `SELECT ${PRODUCT_COLUMNS} FROM urun u WHERE u.urun_no IN (?) FOR UPDATE`,
+      [ids],
+    );
+    if (products.length !== ids.length) {
+      throw new DataError("Sepetteki bir ürün artık satışta değil.", 400);
+    }
+    const outOfStock = products.filter((p) => p.stokMiktari < 1);
+    if (outOfStock.length) {
+      throw new DataError(
+        `Stokta kalmayan ürün: ${outOfStock.map((p) => `${p.marka} ${p.model}`).join(", ")}`,
+      );
+    }
+
+    const [bought] = await conn.query<Row<{ urunNo: number }>[]>(
+      "SELECT urun_no AS urunNo FROM satin_alir WHERE kimlik_no = ? AND urun_no IN (?)",
+      [customer.kimlikNo, ids],
+    );
+    if (bought.length) {
+      const names = products
+        .filter((p) => bought.some((b) => b.urunNo === p.urunNo))
+        .map((p) => `${p.marka} ${p.model}`);
+      throw new DataError(
+        `Bu ürünleri daha önce satın aldınız: ${names.join(", ")}. Sepetten çıkarıp tekrar deneyin.`,
+      );
+    }
+
+    const tutar =
+      Math.round(products.reduce((sum, p) => sum + p.birimFiyati, 0) * 100) / 100;
+    const [invoice] = await conn.query<ResultSetHeader>(
+      "INSERT INTO fatura (tutar, tarih) VALUES (?, CURDATE())",
+      [tutar],
+    );
+    await conn.query("INSERT INTO satin_alir (urun_no, kimlik_no, fatura_no) VALUES ?", [
+      ids.map((id) => [id, customer.kimlikNo, invoice.insertId]),
+    ]);
+    await conn.query("UPDATE urun SET stok_miktari = stok_miktari - 1 WHERE urun_no IN (?)", [ids]);
+    return invoice.insertId;
+  });
+}
+
+/**
+ * Deletes an invoice: removes its satin_alir rows, puts the stock back (one
+ * per product) and deletes the fatura row.
+ */
+export async function deleteInvoice(faturaNo: number): Promise<void> {
+  await transaction(async (conn) => {
+    const [items] = await conn.query<Row<{ urunNo: number }>[]>(
+      "SELECT urun_no AS urunNo FROM satin_alir WHERE fatura_no = ? FOR UPDATE",
+      [faturaNo],
+    );
+    if (items.length) {
+      await conn.query("DELETE FROM satin_alir WHERE fatura_no = ?", [faturaNo]);
+      await conn.query("UPDATE urun SET stok_miktari = stok_miktari + 1 WHERE urun_no IN (?)", [
+        items.map((i) => i.urunNo),
+      ]);
+    }
+    const [result] = await conn.query<ResultSetHeader>("DELETE FROM fatura WHERE fatura_no = ?", [faturaNo]);
+    if (result.affectedRows === 0) throw notFound("Fatura");
+  });
 }
 
 // ---------- Dashboard ----------
 
 export async function getDashboardStats() {
-  const { orders, products, customers } = await read();
-  const active = orders.filter((o) => o.status !== "cancelled");
-  return {
-    revenue: active.reduce((sum, o) => sum + o.total, 0),
-    orderCount: orders.length,
-    pendingCount: orders.filter((o) => o.status === "pending").length,
-    customerCount: customers.length,
-    productCount: products.length,
-    lowStock: products.filter((p) => p.stock <= 5),
-  };
+  const [counts] = await query<{
+    ciro: number;
+    faturaSayisi: number;
+    musteriSayisi: number;
+    urunSayisi: number;
+    sirketSayisi: number;
+  }>(
+    `SELECT
+       (SELECT COALESCE(SUM(tutar), 0) FROM fatura) AS ciro,
+       (SELECT COUNT(*) FROM fatura) AS faturaSayisi,
+       (SELECT COUNT(*) FROM musteri) AS musteriSayisi,
+       (SELECT COUNT(*) FROM urun) AS urunSayisi,
+       (SELECT COUNT(*) FROM sirket) AS sirketSayisi`,
+  );
+  const azalanStok = await query<Product>(
+    `SELECT ${PRODUCT_COLUMNS} FROM urun u WHERE u.stok_miktari <= 5
+     ORDER BY u.stok_miktari, u.marka LIMIT 10`,
+  );
+  return { ...counts, azalanStok };
 }

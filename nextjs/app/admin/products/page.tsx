@@ -1,11 +1,12 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Suspense } from "react";
-import { DeleteProductButton } from "@/components/admin/delete-product-button";
+import { DeleteButton } from "@/components/admin/delete-button";
 import { cardClass, PageHeader, tableClass, tdClass, thClass } from "@/components/admin/page-header";
-import { TableSkeleton } from "@/components/ui";
+import { EmptyState, TableSkeleton } from "@/components/ui";
+import { deleteProduct } from "@/lib/actions";
 import { getProducts } from "@/lib/data";
-import { formatPrice } from "@/lib/format";
+import { formatPrice, formatWarranty } from "@/lib/format";
 
 export const metadata: Metadata = { title: "Ürünler" };
 
@@ -14,7 +15,7 @@ export default function AdminProductsPage() {
     <>
       <PageHeader
         title="Ürünler"
-        description="Ürünleri ekleyin, düzenleyin veya silin"
+        description="urun tablosu: ürünleri ekleyin, düzenleyin veya silin"
         action={
           <Link
             href="/admin/products/new"
@@ -33,44 +34,51 @@ export default function AdminProductsPage() {
 
 async function ProductTable() {
   const products = await getProducts();
-  if (products.length === 0) {
-    return (
-      <p className="rounded-xl border border-dashed border-zinc-300 bg-white p-10 text-center text-zinc-500">
-        Henüz ürün yok.
-      </p>
-    );
-  }
+  if (products.length === 0) return <EmptyState>Henüz ürün yok.</EmptyState>;
   return (
     <div className={cardClass}>
       <table className={tableClass}>
         <thead className="border-b border-zinc-200 bg-zinc-50">
           <tr>
-            <th className={thClass}>ID</th>
-            <th className={thClass}>Ürün</th>
-            <th className={thClass}>Kategori</th>
-            <th className={`${thClass} text-right`}>Fiyat</th>
+            <th className={thClass}>No</th>
+            <th className={thClass}>Marka</th>
+            <th className={thClass}>Model</th>
+            <th className={`${thClass} text-right`}>Birim fiyatı</th>
             <th className={`${thClass} text-right`}>Stok</th>
+            <th className={thClass}>Garanti</th>
             <th className={`${thClass} text-right`}>İşlemler</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-zinc-100">
           {products.map((p) => (
-            <tr key={p.id} className="hover:bg-zinc-50">
-              <td className={`${tdClass} font-mono text-zinc-500`}>{p.id}</td>
-              <td className={`${tdClass} font-medium`}>{p.name}</td>
-              <td className={`${tdClass} text-zinc-600`}>{p.category?.name ?? "—"}</td>
-              <td className={`${tdClass} text-right`}>{formatPrice(p.price)}</td>
+            <tr key={p.urunNo} className="hover:bg-zinc-50">
+              <td className={`${tdClass} font-mono text-zinc-500`}>{p.urunNo}</td>
+              <td className={`${tdClass} font-medium`}>{p.marka}</td>
+              <td className={tdClass}>{p.model}</td>
+              <td className={`${tdClass} text-right`}>{formatPrice(p.birimFiyati)}</td>
               <td className={`${tdClass} text-right`}>
-                <span className={p.stock === 0 ? "font-medium text-red-600" : p.stock <= 5 ? "font-medium text-amber-600" : ""}>
-                  {p.stock}
+                <span
+                  className={
+                    p.stokMiktari === 0
+                      ? "font-medium text-red-600"
+                      : p.stokMiktari <= 5
+                        ? "font-medium text-amber-600"
+                        : ""
+                  }
+                >
+                  {p.stokMiktari}
                 </span>
               </td>
+              <td className={`${tdClass} text-zinc-600`}>{formatWarranty(p.garantiSuresiAy)}</td>
               <td className={`${tdClass} text-right`}>
-                <div className="flex justify-end gap-3">
-                  <Link href={`/admin/products/${p.id}`} className="text-indigo-600 hover:underline">
+                <div className="flex items-start justify-end gap-3">
+                  <Link href={`/admin/products/${p.urunNo}`} className="text-indigo-600 hover:underline">
                     Düzenle
                   </Link>
-                  <DeleteProductButton id={p.id} name={p.name} />
+                  <DeleteButton
+                    action={deleteProduct.bind(null, p.urunNo)}
+                    confirmText={`"${p.marka} ${p.model}" silinsin mi?`}
+                  />
                 </div>
               </td>
             </tr>

@@ -1,4 +1,4 @@
-// Colored placeholder used until products have real images.
+// Colored placeholder: the `urun` table has no image column.
 
 const palettes = [
   "from-indigo-200 to-sky-100 text-indigo-700",
@@ -8,23 +8,27 @@ const palettes = [
   "from-violet-200 to-fuchsia-100 text-violet-700",
 ];
 
+/** Same brand always gets the same color. */
+function paletteFor(marka: string): string {
+  let hash = 0;
+  for (const ch of marka) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
+  return palettes[hash % palettes.length];
+}
+
 export function ProductImage({
-  name,
-  categoryId,
+  marka,
   className = "",
 }: {
-  name: string;
-  categoryId: number;
+  marka: string;
   className?: string;
 }) {
-  const palette = palettes[(categoryId - 1 + palettes.length) % palettes.length];
   return (
     <div
       aria-hidden
-      className={`flex items-center justify-center bg-linear-to-br ${palette} ${className}`}
+      className={`flex items-center justify-center bg-linear-to-br ${paletteFor(marka)} ${className}`}
     >
-      <span className="text-5xl font-semibold opacity-80">
-        {name.charAt(0).toLocaleUpperCase("tr")}
+      <span className="px-4 text-center text-2xl font-bold tracking-tight opacity-80">
+        {marka}
       </span>
     </div>
   );

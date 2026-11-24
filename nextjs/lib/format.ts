@@ -1,36 +1,25 @@
-import type { OrderStatus } from "./types";
-
 const currency = new Intl.NumberFormat("tr-TR", {
   style: "currency",
   currency: "TRY",
 });
 
-const date = new Intl.DateTimeFormat("tr-TR", {
-  dateStyle: "medium",
-  timeStyle: "short",
-  timeZone: "Europe/Istanbul",
+const dateFormat = new Intl.DateTimeFormat("tr-TR", {
+  dateStyle: "long",
+  timeZone: "UTC",
 });
 
 export function formatPrice(value: number): string {
   return currency.format(value);
 }
 
-export function formatDate(iso: string): string {
-  return date.format(new Date(iso));
+/** Formats a DATE column value ("YYYY-MM-DD"). */
+export function formatDate(value: string): string {
+  return dateFormat.format(new Date(`${value}T00:00:00Z`));
 }
 
-export const statusLabels: Record<OrderStatus, string> = {
-  pending: "Beklemede",
-  preparing: "Hazırlanıyor",
-  shipped: "Kargoda",
-  delivered: "Teslim edildi",
-  cancelled: "İptal edildi",
-};
-
-export const statusStyles: Record<OrderStatus, string> = {
-  pending: "bg-amber-100 text-amber-800",
-  preparing: "bg-sky-100 text-sky-800",
-  shipped: "bg-indigo-100 text-indigo-800",
-  delivered: "bg-emerald-100 text-emerald-800",
-  cancelled: "bg-zinc-200 text-zinc-700",
-};
+export function formatWarranty(months: number | null): string {
+  if (months === null) return "Belirtilmemiş";
+  if (months === 0) return "Garantisiz";
+  if (months % 12 === 0) return `${months / 12} yıl`;
+  return `${months} ay`;
+}

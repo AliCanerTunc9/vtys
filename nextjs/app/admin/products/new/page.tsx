@@ -4,7 +4,7 @@ import { PageHeader } from "@/components/admin/page-header";
 import { ProductForm } from "@/components/admin/product-form";
 import { TableSkeleton } from "@/components/ui";
 import { createProduct } from "@/lib/actions";
-import { getCategories } from "@/lib/data";
+import { getCompanies } from "@/lib/data";
 
 export const metadata: Metadata = { title: "Yeni ürün" };
 
@@ -20,6 +20,6 @@ export default function NewProductPage() {
 }
 
 async function NewProductForm() {
-  const categories = await getCategories();
-  return <ProductForm action={createProduct} categories={categories} />;
+  const companies = await getCompanies();
+  return <ProductForm action={createProduct} companies={companies} />;
 }

@@ -1,16 +1,3 @@
-import { statusLabels, statusStyles } from "@/lib/format";
-import type { OrderStatus } from "@/lib/types";
-
-export function StatusBadge({ status }: { status: OrderStatus }) {
-  return (
-    <span
-      className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${statusStyles[status]}`}
-    >
-      {statusLabels[status]}
-    </span>
-  );
-}
-
 export function ProductGridSkeleton({ count = 8 }: { count?: number }) {
   return (
     <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4">
@@ -35,6 +22,23 @@ export function TableSkeleton({ rows = 5 }: { rows?: number }) {
         <div key={i} className="h-8 animate-pulse rounded bg-zinc-100" />
       ))}
     </div>
+  );
+}
+
+export function EmptyState({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="rounded-xl border border-dashed border-zinc-300 bg-white p-10 text-center text-zinc-500">
+      {children}
+    </div>
+  );
+}
+
+export function FormError({ message }: { message?: string }) {
+  if (!message) return null;
+  return (
+    <p data-testid="form-error" className="rounded-lg bg-red-50 p-3 text-sm text-red-700">
+      {message}
+    </p>
   );
 }
 

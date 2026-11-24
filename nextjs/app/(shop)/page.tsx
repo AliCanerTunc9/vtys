@@ -1,8 +1,8 @@
 import Link from "next/link";
 import { Suspense } from "react";
 import { ProductCard } from "@/components/shop/product-card";
-import { ProductGridSkeleton } from "@/components/ui";
-import { getCategories, getProducts } from "@/lib/data";
+import { EmptyState, ProductGridSkeleton } from "@/components/ui";
+import { getBrands, getProducts } from "@/lib/data";
 
 export default function HomePage() {
   return (
@@ -15,7 +15,7 @@ export default function HomePage() {
           İhtiyacın olan her şey tek bir yerde.
         </h1>
         <p className="mt-3 max-w-lg text-indigo-100">
-          Elektronikten kitaba, giyimden spora yüzlerce ürün uygun fiyatlarla.
+          Güvenilir satıcılardan, garantili ürünler uygun fiyatlarla.
         </p>
         <Link
           href="/products"
@@ -26,11 +26,9 @@ export default function HomePage() {
       </section>
 
       <section>
-        <h2 className="mb-4 text-xl font-semibold">Kategoriler</h2>
-        <Suspense
-          fallback={<div className="h-11 animate-pulse rounded-lg bg-zinc-100" />}
-        >
-          <CategoryLinks />
+        <h2 className="mb-4 text-xl font-semibold">Markalar</h2>
+        <Suspense fallback={<div className="h-11 animate-pulse rounded-lg bg-zinc-100" />}>
+          <BrandLinks />
         </Suspense>
       </section>
 
@@ -49,17 +47,18 @@ export default function HomePage() {
   );
 }
 
-async function CategoryLinks() {
-  const categories = await getCategories();
+async function BrandLinks() {
+  const brands = await getBrands();
+  if (brands.length === 0) return <p className="text-sm text-zinc-500">Henüz marka yok.</p>;
   return (
     <div className="flex flex-wrap gap-2">
-      {categories.map((c) => (
+      {brands.map((marka) => (
         <Link
-          key={c.id}
-          href={`/products?category=${c.slug}`}
+          key={marka}
+          href={`/products?marka=${encodeURIComponent(marka)}`}
           className="rounded-full border border-zinc-200 bg-white px-4 py-2 text-sm font-medium text-zinc-700 transition hover:border-indigo-300 hover:text-indigo-700"
         >
-          {c.name}
+          {marka}
         </Link>
       ))}
     </div>
@@ -67,14 +66,14 @@ async function CategoryLinks() {
 }
 
 async function NewestProducts() {
-  const products = await getProducts();
-  const newest = [...products]
-    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
-    .slice(0, 8);
+  const products = await getProducts({ limit: 8 });
+  if (products.length === 0) {
+    return <EmptyState>Henüz satışta ürün yok.</EmptyState>;
+  }
   return (
     <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4">
-      {newest.map((p) => (
-        <ProductCard key={p.id} product={p} />
+      {products.map((p) => (
+        <ProductCard key={p.urunNo} product={p} />
       ))}
     </div>
   );

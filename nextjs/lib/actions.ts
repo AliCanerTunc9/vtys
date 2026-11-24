@@ -2,172 +2,147 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import * as data from "./data";
+import type { FormState } from "./types";
 import {
-  deleteProductRow,
-  getCategories,
-  getProduct,
-  insertOrder,
-  insertProduct,
-  updateOrderStatusRow,
-  updateProductRow,
-  upsertCustomer,
-  type ProductInput,
-} from "./data";
-import { roundMoney, shippingFor } from "./pricing";
-import { ORDER_STATUSES, type FormState, type OrderItem, type OrderStatus } from "./types";
+  validateCompany,
+  validateCustomer,
+  validateProduct,
+  validateProductList,
+} from "./validation";
 
+// Server Actions used by the site's forms. Validation rules are shared with
+// the REST API in lib/validation.ts.
+//
 // TODO: The admin actions have no authentication yet. Add an admin check to
 // each of them before this goes beyond local development.
 
-function text(formData: FormData, key: string): string {
-  return String(formData.get(key) ?? "").trim();
-}
-
-/** The submitted text fields, used to refill a form after an error. */
+/**
+ * The submitted text fields, used to refill a form after an error. Fields
+ * sent more than once (checkboxes) are joined with commas.
+ */
 function fieldValues(formData: FormData): Record<string, string> {
   const values: Record<string, string> = {};
   formData.forEach((value, key) => {
-    if (typeof value === "string" && !key.startsWith("$ACTION")) values[key] = value;
+    if (typeof value !== "string" || key.startsWith("$ACTION")) return;
+    values[key] = key in values ? `${values[key]},${value}` : value;
   });
   return values;
 }
 
-// ---------- Admin: products ----------
-
-async function parseProduct(
-  formData: FormData,
-): Promise<{ data?: ProductInput; error?: string }> {
-  const name = text(formData, "name");
-  const description = text(formData, "description");
-  const price = Number(text(formData, "price").replace(",", "."));
-  const stock = Number(text(formData, "stock"));
-  const categoryId = Number(text(formData, "categoryId"));
-
-  if (!name) return { error: "Ürün adı zorunlu." };
-  if (!Number.isFinite(price) || price <= 0)
-    return { error: "Fiyat 0'dan büyük bir sayı olmalı." };
-  if (!Number.isInteger(stock) || stock < 0)
-    return { error: "Stok 0 veya daha büyük bir tam sayı olmalı." };
-  const categories = await getCategories();
-  if (!categories.some((c) => c.id === categoryId))
-    return { error: "Geçerli bir kategori seçin." };
-
-  return {
-    data: { name, description, price: roundMoney(price), stock, categoryId },
-  };
+/** Form fields as a plain object; `saticilar` (checkboxes) becomes an array. */
+function formObject(formData: FormData): Record<string, unknown> {
+  return { ...Object.fromEntries(formData), saticilar: formData.getAll("saticilar") };
 }
 
-export async function createProduct(
-  _prev: FormState,
-  formData: FormData,
-): Promise<FormState> {
-  const { data, error } = await parseProduct(formData);
-  if (!data) return { error, values: fieldValues(formData) };
-  await insertProduct(data);
+/** Returns a user-facing message for known errors; rethrows anything else. */
+function userMessage(e: unknown): string {
+  if (e instanceof data.DataError) return e.message;
+  throw e;
+}
+
+// ---------- Admin: products (urun, satar) ----------
+
+export async function createProduct(_prev: FormState, formData: FormData): Promise<FormState> {
+  const result = validateProduct(formObject(formData));
+  if (!result.ok) return { error: result.error, values: fieldValues(formData) };
+  try {
+    await data.insertProduct(result.value.input, result.value.saticilar);
+  } catch (e) {
+    return { error: userMessage(e), values: fieldValues(formData) };
+  }
   revalidatePath("/", "layout");
   redirect("/admin/products");
 }
 
 export async function updateProduct(
-  id: number,
+  urunNo: number,
   _prev: FormState,
   formData: FormData,
 ): Promise<FormState> {
-  const { data, error } = await parseProduct(formData);
-  if (!data) return { error, values: fieldValues(formData) };
-  const ok = await updateProductRow(id, data);
-  if (!ok) return { error: "Ürün bulunamadı.", values: fieldValues(formData) };
+  const result = validateProduct(formObject(formData));
+  if (!result.ok) return { error: result.error, values: fieldValues(formData) };
+  try {
+    await data.updateProduct(urunNo, result.value.input, result.value.saticilar);
+  } catch (e) {
+    return { error: userMessage(e), values: fieldValues(formData) };
+  }
   revalidatePath("/", "layout");
   redirect("/admin/products");
 }
 
-export async function deleteProduct(id: number): Promise<void> {
-  await deleteProductRow(id);
+export async function deleteProduct(urunNo: number): Promise<FormState> {
+  try {
+    await data.deleteProduct(urunNo);
+  } catch (e) {
+    return { error: userMessage(e) };
+  }
   revalidatePath("/", "layout");
+  return {};
 }
 
-// ---------- Admin: orders ----------
+// ---------- Admin: companies (sirket) ----------
 
-export async function updateOrderStatus(
-  id: number,
-  formData: FormData,
-): Promise<void> {
-  const status = text(formData, "status") as OrderStatus;
-  if (!ORDER_STATUSES.includes(status)) return;
-  await updateOrderStatusRow(id, status);
-  revalidatePath("/admin", "layout");
+export async function createCompany(_prev: FormState, formData: FormData): Promise<FormState> {
+  const result = validateCompany(formObject(formData));
+  if (!result.ok) return { error: result.error, values: fieldValues(formData) };
+  await data.insertCompany(result.value);
+  revalidatePath("/", "layout");
+  redirect("/admin/companies");
 }
 
-// ---------- Customer: checkout ----------
-
-export async function placeOrder(
+export async function updateCompany(
+  sirketNo: number,
   _prev: FormState,
   formData: FormData,
 ): Promise<FormState> {
-  const result = await createOrderFromForm(formData);
-  if (typeof result === "string") {
-    return { error: result, values: fieldValues(formData) };
+  const result = validateCompany(formObject(formData));
+  if (!result.ok) return { error: result.error, values: fieldValues(formData) };
+  try {
+    await data.updateCompany(sirketNo, result.value);
+  } catch (e) {
+    return { error: userMessage(e), values: fieldValues(formData) };
   }
   revalidatePath("/", "layout");
-  redirect(`/checkout/success?order=${result.orderId}`);
+  redirect("/admin/companies");
 }
 
-/** Returns the new order id, or an error message for the customer. */
-async function createOrderFromForm(
-  formData: FormData,
-): Promise<{ orderId: number } | string> {
-  const firstName = text(formData, "firstName");
-  const lastName = text(formData, "lastName");
-  const email = text(formData, "email");
-  const phone = text(formData, "phone");
-  const city = text(formData, "city");
-  const address = text(formData, "address");
-
-  if (!firstName || !lastName || !email || !phone || !city || !address) {
-    return "Lütfen tüm alanları doldurun.";
-  }
-  if (!/^\S+@\S+\.\S+$/.test(email)) {
-    return "Geçerli bir e-posta adresi girin.";
-  }
-
-  // The cart only sends product ids and quantities. Names and prices are
-  // always read again on the server, so the client cannot change them.
-  let requested: unknown;
+export async function deleteCompany(sirketNo: number): Promise<FormState> {
   try {
-    requested = JSON.parse(text(formData, "items"));
-  } catch {
-    return "Sepet okunamadı.";
-  }
-  if (!Array.isArray(requested) || requested.length === 0) {
-    return "Sepetiniz boş.";
-  }
-
-  const items: OrderItem[] = [];
-  for (const entry of requested as { productId?: unknown; quantity?: unknown }[]) {
-    const quantity = Number(entry?.quantity);
-    const product = await getProduct(Number(entry?.productId));
-    if (!product) return "Sepetteki bir ürün artık satışta değil.";
-    if (!Number.isInteger(quantity) || quantity < 1) return "Geçersiz ürün adedi.";
-    if (product.stock < quantity) {
-      return `${product.name} için yeterli stok yok (kalan: ${product.stock}).`;
-    }
-    items.push({
-      productId: product.id,
-      productName: product.name,
-      unitPrice: product.price,
-      quantity,
-    });
-  }
-
-  // Order total includes shipping, using the same rule as the cart.
-  const subtotal = items.reduce((sum, i) => sum + i.unitPrice * i.quantity, 0);
-  const total = roundMoney(subtotal + shippingFor(subtotal));
-
-  try {
-    const customer = await upsertCustomer({ firstName, lastName, email, phone, city });
-    const order = await insertOrder({ customerId: customer.id, items, total, address, city });
-    return { orderId: order.id };
+    await data.deleteCompany(sirketNo);
   } catch (e) {
-    return e instanceof Error ? e.message : "Sipariş oluşturulamadı.";
+    return { error: userMessage(e) };
   }
+  revalidatePath("/", "layout");
+  return {};
+}
+
+// ---------- Customer: checkout (musteri, fatura, satin_alir) ----------
+
+export async function placeOrder(_prev: FormState, formData: FormData): Promise<FormState> {
+  const fail = (error: string): FormState => ({ error, values: fieldValues(formData) });
+
+  const customer = validateCustomer(formObject(formData), { requireAll: true });
+  if (!customer.ok) return fail(customer.error);
+
+  // The cart sends only product numbers. Prices and stock are read again
+  // from the database, so the browser cannot change them.
+  let items: unknown;
+  try {
+    items = JSON.parse(String(formData.get("items") ?? ""));
+  } catch {
+    return fail("Sepet okunamadı.");
+  }
+  const urunler = validateProductList(items);
+  if (!urunler.ok) return fail(urunler.error);
+
+  let faturaNo: number;
+  try {
+    faturaNo = await data.createPurchase(customer.value, urunler.value);
+  } catch (e) {
+    return fail(userMessage(e));
+  }
+
+  revalidatePath("/", "layout");
+  redirect(`/checkout/success?fatura=${faturaNo}`);
 }

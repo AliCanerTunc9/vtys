@@ -3,24 +3,17 @@
 import Link from "next/link";
 import { useActionState } from "react";
 import { SubmitButton } from "@/components/submit-button";
-import { inputClass, labelClass } from "@/components/ui";
+import { FormError, inputClass, labelClass } from "@/components/ui";
 import { placeOrder } from "@/lib/actions";
 import { useCart } from "@/lib/cart";
 import { formatPrice } from "@/lib/format";
 import type { FormState } from "@/lib/types";
 import { OrderSummary } from "../cart/cart-view";
 
-const fields = [
-  { name: "firstName", label: "Ad", autoComplete: "given-name" },
-  { name: "lastName", label: "Soyad", autoComplete: "family-name" },
-  { name: "email", label: "E-posta", type: "email", autoComplete: "email" },
-  { name: "phone", label: "Telefon", type: "tel", autoComplete: "tel" },
-  { name: "city", label: "Şehir", autoComplete: "address-level1" },
-] as const;
-
 export function CheckoutForm() {
   const { items, total } = useCart();
   const [state, formAction] = useActionState<FormState, FormData>(placeOrder, {});
+  const value = (key: string) => state.values?.[key];
 
   if (items.length === 0) {
     return (
@@ -33,68 +26,91 @@ export function CheckoutForm() {
     );
   }
 
-  const cartPayload = JSON.stringify(
-    items.map((i) => ({ productId: i.productId, quantity: i.quantity })),
-  );
-
   return (
     <form action={formAction} className="grid gap-6 lg:grid-cols-[1fr_320px]">
       <div className="space-y-6 rounded-xl border border-zinc-200 bg-white p-6">
-        <h2 className="font-semibold">Teslimat bilgileri</h2>
+        <h2 className="font-semibold">Müşteri bilgileri</h2>
         <div className="grid gap-4 sm:grid-cols-2">
-          {fields.map((f) => (
-            <div key={f.name}>
-              <label htmlFor={f.name} className={labelClass}>
-                {f.label}
-              </label>
-              <input
-                id={f.name}
-                name={f.name}
-                type={"type" in f ? f.type : "text"}
-                autoComplete={f.autoComplete}
-                defaultValue={state.values?.[f.name]}
-                required
-                className={inputClass}
-              />
-            </div>
-          ))}
+          <div>
+            <label htmlFor="kimlikNo" className={labelClass}>
+              T.C. kimlik no
+            </label>
+            <input
+              id="kimlikNo"
+              name="kimlikNo"
+              inputMode="numeric"
+              pattern="\d{11}"
+              maxLength={11}
+              title="11 haneli T.C. kimlik numarası"
+              required
+              defaultValue={value("kimlikNo")}
+              className={inputClass}
+            />
+          </div>
+          <div>
+            <label htmlFor="ad" className={labelClass}>
+              Ad soyad
+            </label>
+            <input
+              id="ad"
+              name="ad"
+              autoComplete="name"
+              maxLength={150}
+              required
+              defaultValue={value("ad")}
+              className={inputClass}
+            />
+          </div>
           <div className="sm:col-span-2">
-            <label htmlFor="address" className={labelClass}>
+            <label htmlFor="telefonNo" className={labelClass}>
+              Telefon
+            </label>
+            <input
+              id="telefonNo"
+              name="telefonNo"
+              type="tel"
+              autoComplete="tel"
+              maxLength={32}
+              required
+              defaultValue={value("telefonNo")}
+              className={inputClass}
+            />
+          </div>
+          <div className="sm:col-span-2">
+            <label htmlFor="adres" className={labelClass}>
               Adres
             </label>
             <textarea
-              id="address"
-              name="address"
+              id="adres"
+              name="adres"
               rows={3}
-              required
+              maxLength={255}
               autoComplete="street-address"
-              defaultValue={state.values?.address}
+              required
+              defaultValue={value("adres")}
               className={inputClass}
             />
           </div>
         </div>
         <p className="rounded-lg bg-zinc-50 p-3 text-sm text-zinc-500">
-          Ödeme kapıda yapılacaktır. Bu bir ders projesidir, gerçek ödeme alınmaz.
+          Daha önce alışveriş yaptıysanız bilgileriniz kimlik numaranıza göre güncellenir. Bu bir
+          ders projesidir, gerçek ödeme alınmaz.
         </p>
       </div>
 
-      <OrderSummary total={total}>
+      <OrderSummary total={total} count={items.length}>
         <ul className="mt-4 space-y-1 border-t border-zinc-200 pt-4 text-sm text-zinc-600">
           {items.map((i) => (
-            <li key={i.productId} className="flex justify-between gap-2">
-              <span className="truncate">
-                {i.quantity} × {i.name}
-              </span>
-              <span>{formatPrice(i.price * i.quantity)}</span>
+            <li key={i.urunNo} className="flex justify-between gap-2">
+              <span className="truncate">{i.name}</span>
+              <span>{formatPrice(i.price)}</span>
             </li>
           ))}
         </ul>
-        <input type="hidden" name="items" value={cartPayload} />
-        {state.error && (
-          <p role="alert" className="mt-4 rounded-lg bg-red-50 p-3 text-sm text-red-700">
-            {state.error}
-          </p>
-        )}
+        <input type="hidden" name="items" value={JSON.stringify(items.map((i) => i.urunNo))} />
+        <div className="mt-4">
+          <FormError message={state.error} />
+        </div>
         <SubmitButton pendingText="Sipariş veriliyor…" className="mt-4 w-full py-3 text-base">
           Siparişi onayla
         </SubmitButton>

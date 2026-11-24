@@ -14,11 +14,9 @@ export default function SuccessPage({ searchParams }: PageProps<"/checkout/succe
       </div>
       <h1 className="text-2xl font-semibold">Siparişiniz alındı!</h1>
       <Suspense fallback={<p className="mt-2 text-zinc-500">&nbsp;</p>}>
-        <OrderNumber searchParams={searchParams} />
+        <InvoiceNumber searchParams={searchParams} />
       </Suspense>
-      <p className="mt-2 text-zinc-500">
-        Siparişiniz hazırlandığında e-posta ile bilgilendirileceksiniz.
-      </p>
+      <p className="mt-2 text-zinc-500">Teşekkür ederiz, ürünleriniz en kısa sürede kargoya verilecek.</p>
       <Link
         href="/products"
         className="mt-6 inline-block rounded-lg bg-indigo-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-indigo-700"
@@ -29,16 +27,16 @@ export default function SuccessPage({ searchParams }: PageProps<"/checkout/succe
   );
 }
 
-async function OrderNumber({
+async function InvoiceNumber({
   searchParams,
 }: {
   searchParams: PageProps<"/checkout/success">["searchParams"];
 }) {
-  const { order } = await searchParams;
-  if (!order) return null;
+  const { fatura } = await searchParams;
+  if (!fatura) return null;
   return (
     <p className="mt-2 text-zinc-600">
-      Sipariş numaranız: <span className="font-mono font-semibold">#{String(order)}</span>
+      Fatura numaranız: <span className="font-mono font-semibold">#{String(fatura)}</span>
     </p>
   );
 }

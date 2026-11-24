@@ -1,63 +1,48 @@
-// Shared data shapes. These mirror the planned SQL tables, so keep them in
-// sync with the schema the database side defines.
+// Data shapes used by the UI. Each one maps to a table in Eticaret.sql; field
+// names are the column names in camelCase (urun_no -> urunNo).
 
-export type Category = {
-  id: number;
-  name: string;
-  slug: string;
-};
-
+/** Table `urun`. */
 export type Product = {
-  id: number;
-  name: string;
-  description: string;
-  price: number;
-  stock: number;
-  categoryId: number;
-  createdAt: string; // ISO date
+  urunNo: number;
+  marka: string;
+  model: string;
+  teknikOzellikler: string | null;
+  birimFiyati: number;
+  garantiSuresiAy: number | null;
+  stokMiktari: number;
 };
 
+/** A product together with the companies that sell it (`satar`). */
+export type ProductWithSellers = Product & { saticilar: Company[] };
+
+/** Table `sirket`. */
+export type Company = {
+  sirketNo: number;
+  ad: string;
+  adres: string | null;
+  telefonNo: string | null;
+};
+
+/** Table `musteri`. */
 export type Customer = {
-  id: number;
-  firstName: string;
-  lastName: string;
-  email: string;
-  phone: string;
-  city: string;
-  createdAt: string;
+  kimlikNo: string;
+  ad: string;
+  adres: string | null;
+  telefonNo: string | null;
 };
 
-export const ORDER_STATUSES = [
-  "pending",
-  "preparing",
-  "shipped",
-  "delivered",
-  "cancelled",
-] as const;
-
-export type OrderStatus = (typeof ORDER_STATUSES)[number];
-
-export type OrderItem = {
-  productId: number;
-  productName: string;
-  unitPrice: number;
-  quantity: number;
+/** Table `fatura`. `tarih` is a DATE, returned as "YYYY-MM-DD". */
+export type Invoice = {
+  faturaNo: number;
+  tutar: number;
+  tarih: string;
 };
 
-export type Order = {
-  id: number;
-  customerId: number;
-  items: OrderItem[];
-  total: number;
-  status: OrderStatus;
-  address: string;
-  city: string;
-  createdAt: string;
+/** An invoice with the customer and products linked to it via `satin_alir`. */
+export type InvoiceDetail = Invoice & {
+  musteri: Customer | null;
+  urunler: Product[];
 };
-
-export type ProductWithCategory = Product & { category: Category | undefined };
-
-export type OrderWithCustomer = Order & { customer: Customer | undefined };
 
 /**
  * Result returned by form actions used with useActionState. `values` sends
@@ -65,3 +50,7 @@ export type OrderWithCustomer = Order & { customer: Customer | undefined };
  * (React resets forms after an action).
  */
 export type FormState = { error?: string; values?: Record<string, string> };
+
+export function productName(p: Pick<Product, "marka" | "model">): string {
+  return `${p.marka} ${p.model}`;
+}
